@@ -4,19 +4,22 @@ import Prelude
 
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE, log)
--- import React as R
-import React (ReactElement)
-import React.DOM as R
--- import React.DOM.Props as RP
--- import ReactDOM as RDOM
-import Thermite as T
 import DOM (DOM)
+import DOM.HTML (window) as DOM
+import DOM.HTML.Types (htmlDocumentToDocument)
+import DOM.HTML.Window (document) as DOM
+import DOM.Node.NonElementParentNode (getElementById)
+import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
 import Data.Array ((..))
+import Data.Maybe (Maybe(..))
+import React (ReactElement, createFactory)
+import React.DOM as R
+import ReactDOM as RD
+import Thermite as T
 
 data Action
 
-type Story = { title :: String
-             }
+type Story = { title :: String }
 
 type State = { topStories :: Array Story }
 
@@ -43,5 +46,12 @@ spec = T.simpleSpec T.defaultPerformAction render
 
 main :: forall e. Eff (console :: CONSOLE, dom :: DOM | e) Unit
 main = do
-  T.defaultMain spec initState unit
-  log "Hello from main"
+  htmlDocument <- DOM.window >>= DOM.document
+  let document = htmlDocumentToDocument htmlDocument
+  maybeContainer <- getElementById (ElementId "app") $ documentToNonElementParentNode document
+  case maybeContainer of
+    Just container -> do
+      let component = T.createClass spec initState
+      let reactElement = createFactory component unit
+      void $ RD.render reactElement container
+    Nothing -> log "container #app not found"
