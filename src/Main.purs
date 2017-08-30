@@ -18,7 +18,7 @@ import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
 import Data.Argonaut (decodeJson)
 import Data.Array ((..))
 import Data.Bifunctor (lmap)
-import Data.Either (either)
+import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
@@ -55,7 +55,9 @@ performAction RootDidMount props state = do
   eitherRes <- getTopStories
   let eitherIds = eitherRes >>= (_.response >>> decodeJson >>> lmap error)
   lift $ logShow eitherIds
-  void $ T.modifyState \s -> s { topStoryIds = either (const []) id eitherIds }
+  case eitherIds of
+    Right ids -> void $ T.modifyState \s -> s { topStoryIds = ids }
+    Left error -> pure unit
 
   where getTopStories =
           lift $ attempt $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
