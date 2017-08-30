@@ -12,7 +12,8 @@
     "purescript-thermite": "^4.1.1",
     "purescript-arrays": "^4.1.2",
     "purescript-affjax": "^4.0.0",
-    "purescript-transformers": "^3.4.0"
+    "purescript-transformers": "^3.4.0",
+    "purescript-argonaut": "^3.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0"

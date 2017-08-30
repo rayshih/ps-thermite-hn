@@ -2,9 +2,12 @@ module Main where
 
 import Prelude
 
+import Control.Monad.Aff (attempt)
+import Control.Monad.Aff.Console (logShow)
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (CONSOLE, log)
+import Control.Monad.Eff.Console (CONSOLE)
+import Control.Monad.Eff.Console as Eff
+import Control.Monad.Eff.Exception (Error, error)
 import Control.Monad.Trans.Class (lift)
 import DOM (DOM)
 import DOM.HTML (window) as DOM
@@ -12,7 +15,10 @@ import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
+import Data.Argonaut (Json, decodeJson)
 import Data.Array ((..))
+import Data.Bifunctor (lmap)
+import Data.Either (Either, either)
 import Data.Maybe (Maybe(..))
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
@@ -26,13 +32,16 @@ data Action = RootDidMount
 
 type Story = { title :: String }
 
-type State = { topStories :: Array Story }
+type State = { topStories :: Array Story
+             , topStoryIds :: Array Int }
 
 genFakeStory :: Int -> Story
 genFakeStory idx = { title: "Fake Story Title " <> show idx }
 
 initState :: State
-initState = { topStories: map genFakeStory (1 .. 30)}
+initState = { topStories: map genFakeStory (1 .. 30)
+            , topStoryIds: []
+            }
 
 renderStoryItem :: Story -> ReactElement
 renderStoryItem { title } = R.div' [ R.text title ]
@@ -43,15 +52,19 @@ renderStoryList = map renderStoryItem
 performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
-  result :: Ajax.AffjaxResponse String <- getTopStories
-  liftEff $ log result.response
+  eitherRes :: Either Error (Ajax.AffjaxResponse Json) <- getTopStories
+  let (eitherIds :: Either Error (Array Int)) =
+        eitherRes >>= (_.response >>> decodeJson >>> lmap error)
+  lift $ logShow eitherIds
+  void $ T.modifyState \s -> s { topStoryIds = either (const []) id eitherIds }
+
   where getTopStories =
-          lift $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
+          lift $ attempt $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
 
 render :: forall eff. T.Render State eff Action
 render dispatch _ state _ =
   [ R.p' [ R.text "Hello thermite!!" ]
-  , R.div' $ renderStoryList state.topStories
+  , R.div' $ renderStoryList <<< map genFakeStory $ state.topStoryIds
   ]
 
 spec :: forall eff. T.Spec (ajax :: AJAX, console :: CONSOLE | eff) State Unit Action
@@ -78,8 +91,9 @@ main = do
   case maybeContainer of
     Just container -> do
       let
+        -- TODO the purescript react seems missing the type annotation for extensible effects
         reactSpec = T.createReactSpec spec initState
         component = React.createClass <<< _.spec $ withComponentDidMount reactSpec
         reactElement = createFactory component unit
       void $ RD.render reactElement container
-    Nothing -> log "container #app not found"
+    Nothing -> Eff.log "container #app not found"
