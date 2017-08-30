@@ -7,7 +7,7 @@ import Control.Monad.Aff.Console (logShow)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Console as Eff
-import Control.Monad.Eff.Exception (Error, error)
+import Control.Monad.Eff.Exception (error)
 import Control.Monad.Trans.Class (lift)
 import DOM (DOM)
 import DOM.HTML (window) as DOM
@@ -15,10 +15,10 @@ import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
-import Data.Argonaut (Json, decodeJson)
+import Data.Argonaut (decodeJson)
 import Data.Array ((..))
 import Data.Bifunctor (lmap)
-import Data.Either (Either, either)
+import Data.Either (either)
 import Data.Maybe (Maybe(..))
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
@@ -52,9 +52,8 @@ renderStoryList = map renderStoryItem
 performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
-  eitherRes :: Either Error (Ajax.AffjaxResponse Json) <- getTopStories
-  let (eitherIds :: Either Error (Array Int)) =
-        eitherRes >>= (_.response >>> decodeJson >>> lmap error)
+  eitherRes <- getTopStories
+  let eitherIds = eitherRes >>= (_.response >>> decodeJson >>> lmap error)
   lift $ logShow eitherIds
   void $ T.modifyState \s -> s { topStoryIds = either (const []) id eitherIds }
 
