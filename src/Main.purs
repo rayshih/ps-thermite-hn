@@ -7,7 +7,8 @@ import Control.Monad.Aff.Console (logShow)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Console as Eff
-import Control.Monad.Eff.Exception (error)
+import Control.Monad.Eff.Exception (Error, error)
+import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Trans.Class (lift)
 import DOM (DOM)
 import DOM.HTML (window) as DOM
@@ -15,10 +16,9 @@ import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
-import Data.Argonaut (decodeJson)
+import Data.Argonaut (class DecodeJson, Json, decodeJson)
 import Data.Array ((..))
-import Data.Bifunctor (lmap)
-import Data.Either (Either(..))
+import Data.Either (Either(..), either)
 import Data.Maybe (Maybe(..))
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
@@ -49,18 +49,18 @@ renderStoryItem { title } = R.div' [ R.text title ]
 renderStoryList :: Array Story -> Array ReactElement
 renderStoryList = map renderStoryItem
 
+parseOrThrow :: forall m a. MonadThrow Error m => DecodeJson a => Json -> m a
+parseOrThrow json = either (throwError <<< error) pure $ decodeJson json
+
 performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
-  eitherRes <- getTopStories
-  let eitherIds = eitherRes >>= (_.response >>> decodeJson >>> lmap error)
-  lift $ logShow eitherIds
+  eitherIds <- lift $ attempt $ do
+    res <- Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
+    parseOrThrow res.response
   case eitherIds of
     Right ids -> void $ T.modifyState \s -> s { topStoryIds = ids }
-    Left error -> pure unit
-
-  where getTopStories =
-          lift $ attempt $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
+    Left error -> lift $ logShow error
 
 render :: forall eff. T.Render State eff Action
 render dispatch _ state _ =
