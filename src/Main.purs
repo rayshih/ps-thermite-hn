@@ -2,13 +2,15 @@ module Main where
 
 import Prelude
 
-import Control.Monad.Aff (attempt)
-import Control.Monad.Aff.Console (logShow)
+import Control.Monad.Aff (Aff, attempt)
+import Control.Monad.Aff.Console (log)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (CONSOLE)
 import Control.Monad.Eff.Console as Eff
 import Control.Monad.Eff.Exception (Error, error)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Except (ExceptT(..), runExceptT)
+import Control.Monad.Except.Trans (class MonadTrans)
 import Control.Monad.Trans.Class (lift)
 import DOM (DOM)
 import DOM.HTML (window) as DOM
@@ -18,7 +20,7 @@ import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
 import Data.Argonaut (class DecodeJson, Json, decodeJson)
 import Data.Array ((..))
-import Data.Either (Either(..), either)
+import Data.Either (either)
 import Data.Maybe (Maybe(..))
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
@@ -55,12 +57,39 @@ parseOrThrow json = either (throwError <<< error) pure $ decodeJson json
 performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
-  eitherIds <- lift $ attempt $ do
-    res <- Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
-    parseOrThrow res.response
-  case eitherIds of
-    Right ids -> void $ T.modifyState \s -> s { topStoryIds = ids }
-    Left error -> lift $ logShow error
+  result <- runExceptT do
+    liftAff $ log "Fetching Top Stories..."
+    res <- liftAff $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
+
+    liftAff $ log "Parsing Json..."
+    -- demo of error throw catch
+    -- _ <- throwError $ error "test error"
+    ids <- liftAff $ parseOrThrow res.response
+
+    liftAff $ log "Update State..."
+    r <- lift $ T.modifyState \s -> s { topStoryIds = ids }
+
+    liftAff $ log "Done!"
+    pure r
+
+  either
+    (\e -> lift $ log $ "Caught error: \n" <> show e)
+    (\r -> pure unit)
+    result
+
+  where
+    liftAff :: forall eff1 m a
+             . MonadTrans m
+            => Aff eff1 a
+            -> ExceptT Error (m (Aff eff1)) a
+    liftAff = ExceptT <<< lift <<< attempt
+
+  -- eitherIds <- lift $ attempt $ do
+  --   res <- Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
+  --   parseOrThrow res.response
+  -- case eitherIds of
+  --   Right ids -> void $ T.modifyState \s -> s { topStoryIds = ids }
+  --   Left error -> lift $ logShow error
 
 render :: forall eff. T.Render State eff Action
 render dispatch _ state _ =
