@@ -19,34 +19,60 @@ import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
 import Data.Argonaut (class DecodeJson, Json, decodeJson)
-import Data.Array ((..))
+import Data.Array (fold, singleton)
 import Data.Either (either)
+import Data.Lens (Lens', Prism', lens, over, prism')
+import Data.List (List)
 import Data.Maybe (Maybe(..))
+import Data.Monoid as L
+import Data.StrMap (StrMap)
+import Data.StrMap as M
+import Data.Tuple (Tuple(..), uncurry)
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
 import React (ReactElement, createFactory)
 import React as React
 import React.DOM as R
 import ReactDOM as RD
+import Thermite (Render)
 import Thermite as T
 
+data StoryAction
+
 data Action = RootDidMount
+            | StoryAction Int StoryAction
 
 type Story = { title :: String }
 
-type State = { topStories :: Array Story
-             , topStoryIds :: Array Int }
+type State = { topStories :: StrMap Story
+             , topStoryIds :: List Int }
 
 genFakeStory :: Int -> Story
-genFakeStory idx = { title: "Fake Story Title " <> show idx }
+genFakeStory id = { title: "Fake Story Title " <> show id }
 
 initState :: State
-initState = { topStories: map genFakeStory (1 .. 30)
-            , topStoryIds: []
+initState = { topStories: M.empty
+            , topStoryIds: L.mempty
             }
+
+_topStoryIds :: Lens' State (List Int)
+_topStoryIds = lens _.topStoryIds (_ { topStoryIds = _})
+
+_StoryAction :: Prism' Action (Tuple Int StoryAction)
+_StoryAction = prism' (uncurry StoryAction) \a ->
+  case a of
+    (StoryAction idx sa)-> Just (Tuple idx sa)
+    _ -> Nothing
 
 renderStoryItem :: Story -> ReactElement
 renderStoryItem { title } = R.div' [ R.text title ]
+
+-- TODO replace string with story
+storyItemSpec :: forall eff. T.Spec eff Int Unit StoryAction
+storyItemSpec = T.simpleSpec T.defaultPerformAction render
+  where
+    render :: Render Int Unit StoryAction
+    render dispatch _ id _ = singleton $ R.div' [ R.text $ show id ]
 
 renderStoryList :: Array Story -> Array ReactElement
 renderStoryList = map renderStoryItem
@@ -91,14 +117,23 @@ performAction RootDidMount props state = do
   --   Right ids -> void $ T.modifyState \s -> s { topStoryIds = ids }
   --   Left error -> lift $ logShow error
 
-render :: forall eff. T.Render State eff Action
-render dispatch _ state _ =
-  [ R.p' [ R.text "Hello thermite!!" ]
-  , R.div' $ renderStoryList <<< map genFakeStory $ state.topStoryIds
-  ]
+performAction _ _ _ = pure unit
 
 spec :: forall eff. T.Spec (ajax :: AJAX, console :: CONSOLE | eff) State Unit Action
-spec = T.simpleSpec performAction render
+spec = container $ fold
+  [ stories
+  , actions
+  ]
+  where
+    container = over T._render \render d p s c ->
+      [ R.p' [ R.text "Hello thermite!!" ]
+      , R.div' $ render d p s c
+      ]
+
+    stories = T.focus _topStoryIds _StoryAction $
+      T.foreach \_ -> storyItemSpec
+
+    actions = T.simpleSpec performAction T.defaultRender
 
 type ReactSpec props state eff =
   { spec :: React.ReactSpec props state eff
