@@ -12,25 +12,28 @@ import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (ExceptT(..), runExceptT)
 import Control.Monad.Except.Trans (class MonadTrans)
 import Control.Monad.Trans.Class (lift)
+import Control.Parallel (parallel, sequential)
 import DOM (DOM)
 import DOM.HTML (window) as DOM
 import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
-import Data.Argonaut (class DecodeJson, Json, decodeJson)
+import Data.Argonaut (class DecodeJson, Json, decodeJson, (.?))
 import Data.Array (fold, singleton)
 import Data.Either (either)
 import Data.Lens (Lens', Prism', lens, over, prism')
-import Data.List (List)
+import Data.List (List, catMaybes, take)
 import Data.Maybe (Maybe(..))
 import Data.Monoid as L
+import Data.Newtype (class Newtype, unwrap)
 import Data.StrMap (StrMap)
 import Data.StrMap as M
+import Data.Traversable (for, for_, traverse_)
 import Data.Tuple (Tuple(..), uncurry)
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
-import React (ReactElement, createFactory)
+import React (createFactory)
 import React as React
 import React.DOM as R
 import ReactDOM as RD
@@ -42,13 +45,21 @@ data StoryAction
 data Action = RootDidMount
             | StoryAction Int StoryAction
 
-type Story = { title :: String }
+newtype Story = Story { title :: String
+                      , id :: Int
+                      }
+
+instance decodeJsonStory :: DecodeJson Story where
+  decodeJson json = do
+    obj <- decodeJson json
+    id <- obj .? "id"
+    title <- obj .? "title"
+    pure $ Story { id, title }
+
+derive instance newtypeStory :: Newtype Story _
 
 type State = { topStories :: StrMap Story
              , topStoryIds :: List Int }
-
-genFakeStory :: Int -> Story
-genFakeStory id = { title: "Fake Story Title " <> show id }
 
 initState :: State
 initState = { topStories: M.empty
@@ -58,24 +69,26 @@ initState = { topStories: M.empty
 _topStoryIds :: Lens' State (List Int)
 _topStoryIds = lens _.topStoryIds (_ { topStoryIds = _})
 
+_topStoryList :: Lens' State (List Story)
+_topStoryList = lens toList mergeState
+  where
+    toList :: State -> List Story
+    toList st = catMaybes $ map (\id -> M.lookup (show id) st.topStories) st.topStoryIds
+
+    mergeState :: State -> List Story -> State
+    mergeState = const -- TODO this may useful for normalize
+
 _StoryAction :: Prism' Action (Tuple Int StoryAction)
 _StoryAction = prism' (uncurry StoryAction) \a ->
   case a of
     (StoryAction idx sa)-> Just (Tuple idx sa)
     _ -> Nothing
 
-renderStoryItem :: Story -> ReactElement
-renderStoryItem { title } = R.div' [ R.text title ]
-
--- TODO replace string with story
-storyItemSpec :: forall eff. T.Spec eff Int Unit StoryAction
+storyItemSpec :: forall eff. T.Spec eff Story Unit StoryAction
 storyItemSpec = T.simpleSpec T.defaultPerformAction render
   where
-    render :: Render Int Unit StoryAction
-    render dispatch _ id _ = singleton $ R.div' [ R.text $ show id ]
-
-renderStoryList :: Array Story -> Array ReactElement
-renderStoryList = map renderStoryItem
+    render :: Render Story Unit StoryAction
+    render dispatch _ (Story st) _ = singleton $ R.div' [ R.text $ st.title ]
 
 parseOrThrow :: forall m a. MonadThrow Error m => DecodeJson a => Json -> m a
 parseOrThrow json = either (throwError <<< error) pure $ decodeJson json
@@ -84,19 +97,18 @@ performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
   result <- runExceptT do
-    liftAff $ log "Fetching Top Stories..."
     res <- liftAff $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
-
-    liftAff $ log "Parsing Json..."
-    -- demo of error throw catch
-    -- _ <- throwError $ error "test error"
     ids <- liftAff $ parseOrThrow res.response
+    _ <- lift $ T.modifyState \s -> s { topStoryIds = ids }
+    (stories :: List Story) <- liftAff $ sequential $ for (take 30 ids) $ \id -> parallel $ do
+      itemRes <- Ajax.get $ "https://hacker-news.firebaseio.com/v0/item/" <> show id <> ".json"
+      parseOrThrow itemRes.response
 
-    liftAff $ log "Update State..."
-    r <- lift $ T.modifyState \s -> s { topStoryIds = ids }
-
-    liftAff $ log "Done!"
-    pure r
+    liftAff $ traverse_ (log <<< _.title <<< unwrap) stories
+    lift $ for_ stories \story ->
+      T.modifyState \s ->
+        s { topStories = M.insert (show <<< _.id <<< unwrap $ story) story s.topStories }
+    pure unit
 
   either
     (\e -> lift $ log $ "Caught error: \n" <> show e)
@@ -130,7 +142,7 @@ spec = container $ fold
       , R.div' $ render d p s c
       ]
 
-    stories = T.focus _topStoryIds _StoryAction $
+    stories = T.focus _topStoryList _StoryAction $
       T.foreach \_ -> storyItemSpec
 
     actions = T.simpleSpec performAction T.defaultRender
