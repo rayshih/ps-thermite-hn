@@ -19,15 +19,15 @@ import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
-import Data.Argonaut (class DecodeJson, Json, decodeJson, (.?))
+import Data (Story(..), State)
+import Data.Argonaut (class DecodeJson, Json, decodeJson)
 import Data.Array (fold, singleton)
 import Data.Either (either)
 import Data.Lens (Lens', Prism', lens, over, prism')
 import Data.List (List, catMaybes, take)
 import Data.Maybe (Maybe(..))
 import Data.Monoid as L
-import Data.Newtype (class Newtype, unwrap)
-import Data.StrMap (StrMap)
+import Data.Newtype (unwrap)
 import Data.StrMap as M
 import Data.Traversable (for, for_, traverse_)
 import Data.Tuple (Tuple(..), uncurry)
@@ -44,22 +44,6 @@ data StoryAction
 
 data Action = RootDidMount
             | StoryAction Int StoryAction
-
-newtype Story = Story { title :: String
-                      , id :: Int
-                      }
-
-instance decodeJsonStory :: DecodeJson Story where
-  decodeJson json = do
-    obj <- decodeJson json
-    id <- obj .? "id"
-    title <- obj .? "title"
-    pure $ Story { id, title }
-
-derive instance newtypeStory :: Newtype Story _
-
-type State = { topStories :: StrMap Story
-             , topStoryIds :: List Int }
 
 initState :: State
 initState = { topStories: M.empty
