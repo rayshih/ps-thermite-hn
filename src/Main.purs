@@ -90,9 +90,6 @@ parseOrThrow json = either (throwError <<< error) pure $ decodeJson json
 performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
-  (Tuple old new) <- lift $ matchesAff routing
-  void $ T.modifyState \s -> s { currentRoute = new }
-
   result <- runExceptT do
     res <- liftAff $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
     ids <- liftAff $ parseOrThrow res.response
@@ -111,6 +108,9 @@ performAction RootDidMount props state = do
     (\e -> lift $ log $ "Caught error: \n" <> show e)
     (\r -> pure unit)
     result
+
+  (Tuple old new) <- lift $ matchesAff routing
+  void $ T.modifyState \s -> s { currentRoute = new }
 
   where
     liftAff :: forall eff1 m a
