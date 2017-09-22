@@ -14,7 +14,8 @@
     "purescript-affjax": "^4.0.0",
     "purescript-transformers": "^3.4.0",
     "purescript-argonaut": "^3.0.0",
-    "purescript-newtype": "^2.0.0"
+    "purescript-newtype": "^2.0.0",
+    "purescript-routing": "^5.1.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0"

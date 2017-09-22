@@ -37,6 +37,8 @@ import React (createFactory)
 import React as React
 import React.DOM as R
 import ReactDOM as RD
+import Router (Route(..), routing)
+import Routing (matchesAff)
 import Thermite (Render)
 import Thermite as T
 
@@ -44,9 +46,11 @@ data StoryAction
 
 data Action = RootDidMount
             | StoryAction Int StoryAction
+            | RouteTo Route
 
 initState :: State
-initState = { topStories: M.empty
+initState = { currentRoute: Top
+            , topStories: M.empty
             , topStoryIds: L.mempty
             }
 
@@ -62,11 +66,17 @@ _topStoryList = lens toList mergeState
     mergeState :: State -> List Story -> State
     mergeState = const -- TODO this may useful for normalize
 
+_currentRoute :: Lens' State Route
+_currentRoute = lens _.currentRoute (_ { currentRoute = _})
+
 _StoryAction :: Prism' Action (Tuple Int StoryAction)
 _StoryAction = prism' (uncurry StoryAction) \a ->
   case a of
     (StoryAction idx sa)-> Just (Tuple idx sa)
     _ -> Nothing
+
+_voidAction :: Prism' Action Void
+_voidAction = prism' absurd (const Nothing)
 
 storyItemSpec :: forall eff. T.Spec eff Story Unit StoryAction
 storyItemSpec = T.simpleSpec T.defaultPerformAction render
@@ -80,6 +90,9 @@ parseOrThrow json = either (throwError <<< error) pure $ decodeJson json
 performAction :: forall eff props.
                  T.PerformAction (ajax :: AJAX, console :: CONSOLE | eff) State props Action
 performAction RootDidMount props state = do
+  (Tuple old new) <- lift $ matchesAff routing
+  void $ T.modifyState \s -> s { currentRoute = new }
+
   result <- runExceptT do
     res <- liftAff $ Ajax.get "https://hacker-news.firebaseio.com/v0/topstories.json"
     ids <- liftAff $ parseOrThrow res.response
@@ -115,12 +128,21 @@ performAction RootDidMount props state = do
 
 performAction _ _ _ = pure unit
 
+routesSpec :: forall eff. T.Spec eff Route Unit Void
+routesSpec = T.simpleSpec T.defaultPerformAction render
+  where
+    render :: Render Route Unit Void
+    render dispatch _ route _ = [ R.div' [ R.text $ show route ] ]
+
 spec :: forall eff. T.Spec (ajax :: AJAX, console :: CONSOLE | eff) State Unit Action
 spec = container $ fold
-  [ stories
+  [ routeDisplay
+  , stories
   , actions
   ]
   where
+    routeDisplay = T.focus _currentRoute _voidAction routesSpec
+
     container = over T._render \render d p s c ->
       [ R.p' [ R.text "Hello thermite!!" ]
       , R.div' $ render d p s c
