@@ -2,6 +2,7 @@ module Main where
 
 import Prelude
 
+import Action (Action(..), StoryAction, _StoryAction, _voidAction)
 import Control.Monad.Aff (Aff, attempt)
 import Control.Monad.Aff.Console (log)
 import Control.Monad.Eff (Eff)
@@ -19,18 +20,18 @@ import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document) as DOM
 import DOM.Node.NonElementParentNode (getElementById)
 import DOM.Node.Types (ElementId(..), documentToNonElementParentNode)
-import Data (Story(..), State)
+import Data (State, _currentRoute, _topStoryList)
 import Data.Argonaut (class DecodeJson, Json, decodeJson)
 import Data.Array (fold, singleton)
 import Data.Either (either)
-import Data.Lens (Lens', Prism', lens, over, prism')
-import Data.List (List, catMaybes, take)
+import Data.Lens (over)
+import Data.List (List, take)
 import Data.Maybe (Maybe(..))
 import Data.Monoid as L
 import Data.Newtype (unwrap)
 import Data.StrMap as M
 import Data.Traversable (for, for_, traverse_)
-import Data.Tuple (Tuple(..), uncurry)
+import Data.Tuple (Tuple(Tuple))
 import Network.HTTP.Affjax (AJAX)
 import Network.HTTP.Affjax as Ajax
 import React (createFactory)
@@ -39,44 +40,15 @@ import React.DOM as R
 import ReactDOM as RD
 import Router (Route(..), routing)
 import Routing (matchesAff)
+import Story (Story(..))
 import Thermite (Render)
 import Thermite as T
-
-data StoryAction
-
-data Action = RootDidMount
-            | StoryAction Int StoryAction
-            | RouteTo Route
 
 initState :: State
 initState = { currentRoute: Top
             , topStories: M.empty
             , topStoryIds: L.mempty
             }
-
-_topStoryIds :: Lens' State (List Int)
-_topStoryIds = lens _.topStoryIds (_ { topStoryIds = _})
-
-_topStoryList :: Lens' State (List Story)
-_topStoryList = lens toList mergeState
-  where
-    toList :: State -> List Story
-    toList st = catMaybes $ map (\id -> M.lookup (show id) st.topStories) st.topStoryIds
-
-    mergeState :: State -> List Story -> State
-    mergeState = const -- TODO this may useful for normalize
-
-_currentRoute :: Lens' State Route
-_currentRoute = lens _.currentRoute (_ { currentRoute = _})
-
-_StoryAction :: Prism' Action (Tuple Int StoryAction)
-_StoryAction = prism' (uncurry StoryAction) \a ->
-  case a of
-    (StoryAction idx sa)-> Just (Tuple idx sa)
-    _ -> Nothing
-
-_voidAction :: Prism' Action Void
-_voidAction = prism' absurd (const Nothing)
 
 storyItemSpec :: forall eff. T.Spec eff Story Unit StoryAction
 storyItemSpec = T.simpleSpec T.defaultPerformAction render
